@@ -244,8 +244,9 @@ resources:
         - task_key: quality_summary
           description: >-
             Logs rows input -> silver -> gold, overall and per-POS-system
-            rejection rates, and top rejection reasons; persists the report to
-            gold.dq_summary.
+            rejection rates, and top rejection reasons; appends a dated
+            snapshot to gold.dq_summary and gold.dq_rejection_reasons for the
+            Theater Data Quality Monitoring dashboard and alerts (Phase 3).
           depends_on:
             - task_key: gold_fct_ticket_sales
           spark_python_task:
