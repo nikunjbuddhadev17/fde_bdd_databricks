@@ -148,6 +148,14 @@ resources:
         dashboard once Gold is validated (see Phase 4: Cutover).
       tags:
         purpose: fde_interview_packet
+      # Prevent a second run from starting (and conflicting on the same
+      # tables) while one is already in flight -- there is no scheduled
+      # trigger today, but this guards against an accidental manual
+      # double-trigger or a retry overlapping a still-running attempt.
+      max_concurrent_runs: 1
+      email_notifications:
+        on_failure:
+          - nbuddhadev@ch.iitr.ac.in
       parameters:
         - name: catalog
           default: ${var.catalog}
@@ -162,6 +170,10 @@ resources:
           description: >-
             Bronze: run the existing seed_theater_data job so ingest logic has
             a single source of truth instead of being duplicated here.
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           run_job_task:
             job_id: ${resources.jobs.seed_theater_data.id}
             job_parameters:
@@ -175,6 +187,10 @@ resources:
             stg_pos_ticket_sales and pos_quality_issues.
           depends_on:
             - task_key: seed_theater_data
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           spark_python_task:
             python_file: ../src/transform/silver_pos_ticket_sales.py
             parameters:
@@ -193,6 +209,10 @@ resources:
             theater_layout_quality_issues.
           depends_on:
             - task_key: seed_theater_data
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           spark_python_task:
             python_file: ../src/transform/silver_theater_layout.py
             parameters:
@@ -211,6 +231,10 @@ resources:
             imdb_quality_issues.
           depends_on:
             - task_key: seed_theater_data
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           spark_python_task:
             python_file: ../src/transform/silver_imdb_movie_metadata.py
             parameters:
@@ -230,6 +254,10 @@ resources:
             - task_key: silver_pos_ticket_sales
             - task_key: silver_theater_layout
             - task_key: silver_imdb_movie_metadata
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           spark_python_task:
             python_file: ../src/transform/gold_fct_ticket_sales.py
             parameters:
@@ -249,6 +277,18 @@ resources:
             Theater Data Quality Monitoring dashboard and alerts (Phase 3).
           depends_on:
             - task_key: gold_fct_ticket_sales
+          # NOTE: gold.dq_summary / gold.dq_rejection_reasons are APPENDED to,
+          # not overwritten (see quality_summary.py), so a retry of this
+          # specific task after a partial failure would append a duplicate
+          # snapshot row for the same logical run. Retries are still enabled
+          # here for consistency with the rest of the pipeline and because
+          # today's failure modes are almost always infra-level (the task
+          # fails before writing anything); revisit once the writes carry a
+          # run_id and become idempotent.
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
           spark_python_task:
             python_file: ../src/transform/quality_summary.py
             parameters:
