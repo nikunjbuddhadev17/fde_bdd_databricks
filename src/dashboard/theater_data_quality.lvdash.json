@@ -1,0 +1,829 @@
+{
+  "datasets": [
+    {
+      "name": "ds_dq_overall_latest",
+      "displayName": "DQ Summary - Latest Run (Overall)",
+      "queryLines": [
+        "WITH s AS (\n",
+        "  SELECT *\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :gold_schema || '.dq_summary')\n",
+        "  WHERE dimension = 'overall'\n",
+        ")\n",
+        "SELECT dataset, dimension, rows_input, rows_accepted, rows_rejected, rejection_rate, as_of\n",
+        "FROM s\n",
+        "WHERE as_of = (SELECT MAX(as_of) FROM s)"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "gold_schema",
+          "keyword": "gold_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "gold"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dq_pos_breakdown_latest",
+      "displayName": "DQ Summary - Latest Run (Per POS System)",
+      "queryLines": [
+        "WITH s AS (\n",
+        "  SELECT *\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :gold_schema || '.dq_summary')\n",
+        "  WHERE dataset = 'pos_ticket_sales' AND dimension != 'overall'\n",
+        ")\n",
+        "SELECT dimension AS pos_source, rows_input, rows_accepted, rows_rejected, rejection_rate\n",
+        "FROM s\n",
+        "WHERE as_of = (SELECT MAX(as_of) FROM s)"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "gold_schema",
+          "keyword": "gold_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "gold"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dq_rejection_reasons_latest",
+      "displayName": "DQ Rejection Reasons - Latest Run (POS)",
+      "queryLines": [
+        "WITH r AS (\n",
+        "  SELECT *\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :gold_schema || '.dq_rejection_reasons')\n",
+        "  WHERE dataset = 'pos_ticket_sales'\n",
+        ")\n",
+        "SELECT pos_source, rejection_reason, count, reason_rate\n",
+        "FROM r\n",
+        "WHERE as_of = (SELECT MAX(as_of) FROM r)"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "gold_schema",
+          "keyword": "gold_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "gold"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dq_freshness",
+      "displayName": "DQ Freshness by Dataset",
+      "queryLines": [
+        "SELECT\n",
+        "  dataset,\n",
+        "  MAX(as_of) AS last_run_at,\n",
+        "  ROUND(TIMESTAMPDIFF(MINUTE, MAX(as_of), CURRENT_TIMESTAMP()) / 60.0, 1) AS hours_since_last_run\n",
+        "FROM IDENTIFIER(:catalog || '.' || :gold_schema || '.dq_summary')\n",
+        "WHERE dimension = 'overall'\n",
+        "GROUP BY dataset"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "gold_schema",
+          "keyword": "gold_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "gold"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dq_trend",
+      "displayName": "DQ Rejection Rate Trend (All Runs)",
+      "queryLines": [
+        "SELECT dataset, as_of, rejection_rate\n",
+        "FROM IDENTIFIER(:catalog || '.' || :gold_schema || '.dq_summary')\n",
+        "WHERE dimension = 'overall'\n",
+        "ORDER BY as_of"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "gold_schema",
+          "keyword": "gold_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "gold"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_data_quality",
+      "displayName": "Data Quality Monitoring",
+      "layout": [
+        {
+          "widget": {
+            "name": "header_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Data Quality Monitoring\n",
+                "Bronze \u2192 Silver \u2192 Gold rejection rates, top rejection reasons, and pipeline freshness for the medallion pipeline. Every chart reflects the latest `build_medallion_theater_sales` run unless noted as a trend."
+              ],
+              "verticalAlign": "VERTICAL_ALIGN_CENTER"
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 24,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_pos_rows_processed",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_overall_latest",
+                  "fields": [
+                    {
+                      "name": "rows_input",
+                      "expression": "MAX(`rows_input`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "filters": [
+                    {
+                      "expression": "`dataset` = 'pos_ticket_sales'"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "rows_input",
+                  "displayName": "POS Rows Processed",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "POS Rows Processed (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_pos_rejection_rate",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_overall_latest",
+                  "fields": [
+                    {
+                      "name": "rejection_rate",
+                      "expression": "MAX(`rejection_rate`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "filters": [
+                    {
+                      "expression": "`dataset` = 'pos_ticket_sales'"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "rejection_rate",
+                  "displayName": "POS Rejection Rate",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "POS Rejection Rate (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_hours_since_last_run",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_freshness",
+                  "fields": [
+                    {
+                      "name": "hours_since_last_run",
+                      "expression": "MAX(`hours_since_last_run`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "filters": [
+                    {
+                      "expression": "`dataset` = 'pos_ticket_sales'"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "hours_since_last_run",
+                  "displayName": "Hours Since Last Run",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Data Freshness (Hours Since Last Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 16,
+            "y": 2,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_pos_rows_accepted",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_pos_breakdown_latest",
+                  "fields": [
+                    {
+                      "name": "pos_source",
+                      "expression": "`pos_source`"
+                    },
+                    {
+                      "name": "rows_accepted",
+                      "expression": "SUM(`rows_accepted`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rows_accepted",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rows Accepted"
+                },
+                "y": {
+                  "fieldName": "pos_source",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "POS System"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Accepted by POS System (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_pos_rows_rejected",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_pos_breakdown_latest",
+                  "fields": [
+                    {
+                      "name": "pos_source",
+                      "expression": "`pos_source`"
+                    },
+                    {
+                      "name": "rows_rejected",
+                      "expression": "SUM(`rows_rejected`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rows_rejected",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rows Rejected"
+                },
+                "y": {
+                  "fieldName": "pos_source",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "POS System"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Rejected by POS System (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 12,
+            "y": 5,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_rejection_reasons",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_rejection_reasons_latest",
+                  "fields": [
+                    {
+                      "name": "rejection_reason",
+                      "expression": "`rejection_reason`"
+                    },
+                    {
+                      "name": "count",
+                      "expression": "SUM(`count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "count",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rows"
+                },
+                "y": {
+                  "fieldName": "rejection_reason",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Rejection Reason"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top Rejection Reasons by Volume - POS (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 24,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_rejection_rate_trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_trend",
+                  "fields": [
+                    {
+                      "name": "as_of",
+                      "expression": "`as_of`"
+                    },
+                    {
+                      "name": "dataset",
+                      "expression": "`dataset`"
+                    },
+                    {
+                      "name": "rejection_rate",
+                      "expression": "AVG(`rejection_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "as_of",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Run Time"
+                },
+                "y": {
+                  "fieldName": "rejection_rate",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rejection Rate"
+                },
+                "color": {
+                  "fieldName": "dataset",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Dataset"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rejection Rate Trend Over Time (All Runs)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 24,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "table_summary_all",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_overall_latest",
+                  "fields": [
+                    {
+                      "name": "dataset",
+                      "expression": "`dataset`"
+                    },
+                    {
+                      "name": "rows_input",
+                      "expression": "`rows_input`"
+                    },
+                    {
+                      "name": "rows_accepted",
+                      "expression": "`rows_accepted`"
+                    },
+                    {
+                      "name": "rows_rejected",
+                      "expression": "`rows_rejected`"
+                    },
+                    {
+                      "name": "rejection_rate",
+                      "expression": "`rejection_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "dataset",
+                    "displayName": "Dataset"
+                  },
+                  {
+                    "fieldName": "rows_input",
+                    "displayName": "Rows Input",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "rows_accepted",
+                    "displayName": "Rows Accepted",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "rows_rejected",
+                    "displayName": "Rows Rejected",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "rejection_rate",
+                    "displayName": "Rejection Rate",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Bronze \u2192 Silver Summary by Dataset (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "table_rejection_reasons_detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_rejection_reasons_latest",
+                  "fields": [
+                    {
+                      "name": "pos_source",
+                      "expression": "`pos_source`"
+                    },
+                    {
+                      "name": "rejection_reason",
+                      "expression": "`rejection_reason`"
+                    },
+                    {
+                      "name": "count",
+                      "expression": "`count`"
+                    },
+                    {
+                      "name": "reason_rate",
+                      "expression": "`reason_rate`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "pos_source",
+                    "displayName": "POS System"
+                  },
+                  {
+                    "fieldName": "rejection_reason",
+                    "displayName": "Rejection Reason"
+                  },
+                  {
+                    "fieldName": "count",
+                    "displayName": "Rows",
+                    "format": {
+                      "type": "number-plain",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 0
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "reason_rate",
+                    "displayName": "Rate (of that POS system's rows)",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rejection Reason Detail - POS (Latest Run)"
+              }
+            }
+          },
+          "position": {
+            "x": 12,
+            "y": 23,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    }
+  ]
+}

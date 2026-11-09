@@ -1,0 +1,99 @@
+# SQL Alerts for the medallion pipeline's data-quality monitoring (Phase 3).
+#
+# Both alerts query the gold.dq_summary / gold.dq_rejection_reasons tables
+# written by quality_summary.py, always filtering to the latest pipeline run
+# via `as_of = (SELECT MAX(as_of) ...)`.
+#
+# Thresholds are tuned against the DQ profiles seeded in
+# ingest_pos_ticket_sales.py (DQ_PROFILES): pos_v3_streaming is clean,
+# pos_v2_batch sums to roughly an 8% rejection rate, and kiosk_v1_batch sums
+# to roughly 30%. A 10% rejection-rate threshold and a 3% orphan-rate
+# threshold separate "normal" (pos_v3, pos_v2) from "needs attention"
+# (kiosk_v1_batch) without false-triggering on the other two systems' known
+# baseline noise. Revisit both thresholds once real production data replaces
+# the synthetic seed.
+#
+# The `alert` resource requires Databricks CLI >= 0.279.0 (see databricks.yml).
+
+resources:
+  alerts:
+    pos_rejection_rate_alert:
+      display_name: "Theater Medallion: POS Rejection Rate Exceeds Threshold"
+      custom_summary: >-
+        A POS system's Silver rejection rate (rows quarantined to
+        pos_quality_issues / rows ingested to Bronze) exceeded the alert
+        threshold in the most recent build_medallion_theater_sales run.
+        Check gold.dq_rejection_reasons and the Theater Data Quality
+        Monitoring dashboard for the specific reason codes driving the spike.
+      query_text: |
+        SELECT
+          dimension AS pos_source,
+          rejection_rate
+        FROM ${var.catalog}.${var.gold_schema}.dq_summary
+        WHERE dataset = 'pos_ticket_sales'
+          AND dimension != 'overall'
+          AND as_of = (
+            SELECT MAX(as_of)
+            FROM ${var.catalog}.${var.gold_schema}.dq_summary
+          )
+        ORDER BY rejection_rate DESC
+      warehouse_id: ${var.warehouse_id}
+      evaluation:
+        comparison_operator: "GREATER_THAN"
+        empty_result_state: "OK"
+        source:
+          aggregation: "MAX"
+          display: "rejection_rate"
+          name: "rejection_rate"
+        threshold:
+          value:
+            double_value: 0.10
+        notification:
+          notify_on_ok: true
+          retrigger_seconds: 86400
+      schedule:
+        pause_status: "UNPAUSED"
+        quartz_cron_schedule: "0 0 9 * * ?"
+        timezone_id: "UTC"
+
+    orphan_rate_spike_alert:
+      display_name: "Theater Medallion: Orphan Theater/Movie Rate Spike"
+      custom_summary: >-
+        A POS system's orphan_theater or orphan_movie reason rate (that
+        specific rejection reason / rows ingested to Bronze for that POS
+        system) exceeded the alert threshold in the most recent
+        build_medallion_theater_sales run. This is more targeted than the
+        overall rejection-rate alert: it isolates referential-integrity
+        failures (bad theater_id / movie_id) from other DQ issues like
+        duplicates or bad prices.
+      query_text: |
+        SELECT
+          pos_source,
+          rejection_reason,
+          reason_rate
+        FROM ${var.catalog}.${var.gold_schema}.dq_rejection_reasons
+        WHERE dataset = 'pos_ticket_sales'
+          AND rejection_reason IN ('orphan_theater', 'orphan_movie')
+          AND as_of = (
+            SELECT MAX(as_of)
+            FROM ${var.catalog}.${var.gold_schema}.dq_rejection_reasons
+          )
+        ORDER BY reason_rate DESC
+      warehouse_id: ${var.warehouse_id}
+      evaluation:
+        comparison_operator: "GREATER_THAN"
+        empty_result_state: "OK"
+        source:
+          aggregation: "MAX"
+          display: "reason_rate"
+          name: "reason_rate"
+        threshold:
+          value:
+            double_value: 0.03
+        notification:
+          notify_on_ok: true
+          retrigger_seconds: 86400
+      schedule:
+        pause_status: "UNPAUSED"
+        quartz_cron_schedule: "0 0 9 * * ?"
+        timezone_id: "UTC"

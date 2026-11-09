@@ -17,12 +17,15 @@
 
 bundle:
   name: fde_theater
-  databricks_cli_version: ">= 0.260.0"
+  # >= 0.279.0 is required for the `alert` resource type (resources/alerts.yml),
+  # used by Phase 3's data-quality alerting.
+  databricks_cli_version: ">= 0.279.0"
 
 include:
   - resources/dashboards.yml
   - resources/jobs.yml
   - resources/apps.yml
+  - resources/alerts.yml
 
 sync:
   exclude:

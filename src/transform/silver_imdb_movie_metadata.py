@@ -60,7 +60,17 @@ def add_quality_flags(df: DataFrame) -> DataFrame:
         null_condition = null_condition | F.col(column).isNull()
     df = df.withColumn("is_null_critical_field", null_condition)
 
-    df = df.withColumn("_parsed_release_date", F.to_date(F.col("release_date"), "yyyy-MM-dd"))
+    # try_to_timestamp (not to_date/try_to_date) so a format mismatch or an
+    # out-of-range calendar date (e.g. "2023-02-30") resolves to NULL instead
+    # of raising -- Databricks serverless compute runs with ANSI SQL mode
+    # enabled, under which to_date throws on the first unparseable value.
+    # try_to_date would do this more directly but requires DBR 17.2+;
+    # try_to_timestamp (DBR 11.3+) goes through the same strict date parser
+    # and is safe to cast down to a date.
+    df = df.withColumn(
+        "_parsed_release_date",
+        F.try_to_timestamp(F.col("release_date"), F.lit("yyyy-MM-dd")).cast("date"),
+    )
     df = df.withColumn(
         "is_invalid_release_date",
         F.col("release_date").isNotNull() & F.col("_parsed_release_date").isNull(),

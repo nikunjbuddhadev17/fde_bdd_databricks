@@ -5,3 +5,8 @@ resources:
       file_path: ../src/dashboard/theater_performance.lvdash.json
       warehouse_id: ${var.warehouse_id}
       parent_path: ${workspace.root_path}
+    theater_data_quality:
+      display_name: "Theater Data Quality Monitoring"
+      file_path: ../src/dashboard/theater_data_quality.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      parent_path: ${workspace.root_path}

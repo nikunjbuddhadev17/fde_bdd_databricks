@@ -64,15 +64,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def parse_timestamps(df: DataFrame) -> DataFrame:
-    """Parses purchase_timestamp (ISO or legacy) and showtime (ISO) to TIMESTAMP."""
+    """Parses purchase_timestamp (ISO or legacy) and showtime (ISO) to TIMESTAMP.
+
+    Uses try_to_timestamp (not to_timestamp) so a format mismatch resolves to
+    NULL instead of raising CANNOT_PARSE_TIMESTAMP. Databricks serverless
+    compute runs with ANSI SQL mode enabled, under which to_timestamp throws
+    on the first row that doesn't match its pattern -- which would abort this
+    coalesce() before the legacy-format fallback is ever tried, and would
+    also fail the whole job on a single malformed showtime.
+    """
     df = df.withColumn(
         "_parsed_purchase_timestamp",
         F.coalesce(
-            F.to_timestamp("purchase_timestamp", ISO_TS_PATTERN),
-            F.to_timestamp("purchase_timestamp", LEGACY_TS_PATTERN),
+            F.try_to_timestamp("purchase_timestamp", F.lit(ISO_TS_PATTERN)),
+            F.try_to_timestamp("purchase_timestamp", F.lit(LEGACY_TS_PATTERN)),
         ),
     )
-    df = df.withColumn("_parsed_showtime", F.to_timestamp("showtime", ISO_TS_PATTERN))
+    df = df.withColumn(
+        "_parsed_showtime",
+        F.try_to_timestamp("showtime", F.lit(ISO_TS_PATTERN)),
+    )
     return df
 
 
