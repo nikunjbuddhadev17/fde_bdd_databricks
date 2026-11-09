@@ -31,11 +31,17 @@ sync:
 
 variables:
   catalog:
-    description: "Catalog where bronze + denormalized tables are written."
-    default: workspace
-  schema:
-    description: "Schema where bronze + denormalized tables are written."
-    default: fde_theater
+    description: "Catalog where medallion (bronze, silver, gold) tables are written."
+    default: theater_management
+  bronze_schema:
+    description: "Schema where bronze (raw) tables are written."
+    default: bronze
+  silver_schema:
+    description: "Schema where silver (cleaned) tables are written."
+    default: silver
+  gold_schema:
+    description: "Schema where gold (business-ready) tables are written."
+    default: gold
   warehouse_id:
     description: "SQL warehouse ID used by the dashboard. Defaults to the Serverless Starter Warehouse present in fresh workspaces; override with --var=\"warehouse_id=<id>\" if it has been renamed or deleted."
     lookup:
