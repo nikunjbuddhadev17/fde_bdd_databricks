@@ -224,6 +224,89 @@
           }
         }
       ]
+    },
+    {
+      "name": "ds_dq_pending_review",
+      "displayName": "DQ Rows Pending Review (Correction Feedback Loop)",
+      "queryLines": [
+        "SELECT COUNT(*) AS pending_count\n",
+        "FROM IDENTIFIER(:catalog || '.' || :silver_schema || '.pos_quality_issues')\n",
+        "WHERE resolution_status = 'PENDING_REVIEW'"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "silver_schema",
+          "keyword": "silver_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "silver"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_dq_corrected",
+      "displayName": "DQ Rows Resolved via Correction Feedback Loop",
+      "queryLines": [
+        "SELECT\n",
+        "  COUNT(*) FILTER (WHERE is_corrected) AS corrected_count,\n",
+        "  COUNT(*) FILTER (WHERE is_manually_approved) AS approved_count\n",
+        "FROM IDENTIFIER(:catalog || '.' || :silver_schema || '.stg_pos_ticket_sales')"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "theater_management"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "silver_schema",
+          "keyword": "silver_schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "silver"
+                }
+              ]
+            }
+          }
+        }
+      ]
     }
   ],
   "pages": [
@@ -821,6 +904,165 @@
             "y": 23,
             "width": 12,
             "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "header_corrections",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Correction Feedback Loop\n",
+                "Rows a data steward has reviewed and corrected, approved as-is, or permanently rejected via `silver.pos_corrections` -- submitted through the Data Steward Review tab in the reel-insights app, or seeded for demonstration by `seed_demo_corrections.py`."
+              ],
+              "verticalAlign": "VERTICAL_ALIGN_CENTER"
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 31,
+            "width": 24,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_pending_review",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_pending_review",
+                  "fields": [
+                    {
+                      "name": "pending_count",
+                      "expression": "MAX(`pending_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "pending_count",
+                  "displayName": "Rows Pending Review",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Pending Review"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 33,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_corrected",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_corrected",
+                  "fields": [
+                    {
+                      "name": "corrected_count",
+                      "expression": "MAX(`corrected_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "corrected_count",
+                  "displayName": "Rows Corrected",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Corrected (Current Silver Snapshot)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 33,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_approved_as_is",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_dq_corrected",
+                  "fields": [
+                    {
+                      "name": "approved_count",
+                      "expression": "MAX(`approved_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "approved_count",
+                  "displayName": "Rows Approved As-Is",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows Approved As-Is (Current Silver Snapshot)"
+              }
+            }
+          },
+          "position": {
+            "x": 16,
+            "y": 33,
+            "width": 8,
+            "height": 3
           }
         }
       ]

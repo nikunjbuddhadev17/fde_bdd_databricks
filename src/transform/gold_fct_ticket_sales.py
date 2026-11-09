@@ -10,7 +10,11 @@ between Silver runs, not a dirty source record.
 Quality metadata (`data_quality_flag`, `quality_checked_at`,
 `ingest_timestamp`) carried over from `silver.stg_pos_ticket_sales` stays
 visible on every Gold row per the plan's "quality metadata visible to
-downstream" requirement.
+downstream" requirement. `is_corrected` / `is_manually_approved` likewise
+carry forward the correction feedback loop's audit trail (see
+`silver_pos_ticket_sales.py`), so a row that only reached Gold because a
+data steward corrected or approved it remains distinguishable from a row
+that was always clean.
 
 Run via DABs:
     databricks bundle run -t dev build_medallion_theater_sales
@@ -89,7 +93,9 @@ SELECT
   s.pos_source,
   s.data_quality_flag,
   s.quality_checked_at,
-  s.ingest_timestamp
+  s.ingest_timestamp,
+  s.is_corrected,
+  s.is_manually_approved
 FROM {silver_pos} s
 LEFT JOIN {silver_layout} l ON s.theater_id = l.theater_id AND s.screen_id = l.screen_id
 LEFT JOIN {silver_movie}  m ON s.movie_id  = m.imdb_id

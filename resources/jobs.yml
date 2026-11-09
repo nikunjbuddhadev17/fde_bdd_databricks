@@ -202,6 +202,32 @@ resources:
               - "{{job.parameters.silver_schema}}"
           environment_key: default
 
+        - task_key: seed_demo_corrections
+          description: >-
+            Demo only, runs once: seeds a handful of illustrative corrections
+            into silver.pos_corrections from real PENDING_REVIEW rows in
+            pos_quality_issues, so the correction feedback loop (Phase
+            "tightened data engineering") is visibly demonstrable. No-ops on
+            every run after the first (pos_corrections already has rows).
+            Corrections seeded here take effect on the *next* pipeline run,
+            not this one -- see seed_demo_corrections.py docstring.
+          depends_on:
+            - task_key: silver_pos_ticket_sales
+          max_retries: 2
+          min_retry_interval_millis: 60000
+          retry_on_timeout: true
+          timeout_seconds: 3600
+          spark_python_task:
+            python_file: ../src/transform/seed_demo_corrections.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+          environment_key: default
+
         - task_key: silver_theater_layout
           description: >-
             Silver: deduplicate screen_id, validate required fields and

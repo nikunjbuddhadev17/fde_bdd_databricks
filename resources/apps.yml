@@ -1,6 +1,46 @@
+# The Data Steward Review tab (src/app/app.py) needs a SQL warehouse to query
+# and a Unity Catalog grant on the two tables it reads/writes.
+#
+# IMPORTANT deployment ordering: the uc_securable resources below grant
+# permissions on specific tables (silver.pos_quality_issues,
+# silver.pos_corrections). Those tables are created by the
+# build_medallion_theater_sales job's silver_pos_ticket_sales task, not by
+# this app. Run that job at least once (so the tables exist) before
+# deploying/redeploying this app resource, or the grant will fail against a
+# nonexistent table -- the same seed-before-build ordering constraint this
+# bundle already has elsewhere (see README.md "Fast Iteration").
 resources:
   apps:
     reel_insights_app:
       name: reel-insights-app
-      description: A Gradio application for generating insights from theater data
+      description: >-
+        A Gradio application for generating insights from theater data, and
+        for reviewing/correcting data-quality-quarantined POS rows (Data
+        Steward Review tab).
       source_code_path: ../src/app
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: pos-quality-issues-read
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.silver_schema}.pos_quality_issues
+            securable_type: TABLE
+            permission: SELECT
+        - name: pos-corrections-read
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.silver_schema}.pos_corrections
+            securable_type: TABLE
+            permission: SELECT
+        - name: pos-corrections-write
+          uc_securable:
+            securable_full_name: ${var.catalog}.${var.silver_schema}.pos_corrections
+            securable_type: TABLE
+            permission: MODIFY
+      config:
+        env:
+          - name: APP_CATALOG
+            value: ${var.catalog}
+          - name: APP_SILVER_SCHEMA
+            value: ${var.silver_schema}

@@ -2,3 +2,9 @@ command: [
   "python", 
   "app.py"
 ]
+env:
+  # Bound to the "sql-warehouse" resource declared in
+  # resources/apps.yml -- the warehouse the Data Steward Review tab
+  # uses to read pos_quality_issues and write pos_corrections.
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse

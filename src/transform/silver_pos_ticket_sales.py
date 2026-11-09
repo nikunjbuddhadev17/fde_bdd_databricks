@@ -5,17 +5,30 @@ data-quality issues (see `src/ingest/ingest_pos_ticket_sales.py`) -- into a
 validated Silver table.
 
 Processing order:
-  1. Parse `purchase_timestamp` (ISO, or legacy "%m/%d/%Y %I:%M %p" used by
+  1. Correction reconciliation: LEFT JOIN `silver.pos_corrections` -- a
+     human-reviewed table populated by a data steward (via the Data Steward
+     Review tab in the Databricks App, or seeded with illustrative examples
+     by `seed_demo_corrections.py`) -- onto the raw row by `transaction_id`,
+     and apply any corrected field values via COALESCE *before* any
+     validation runs. A correction is a resubmission, not a blank check: the
+     corrected values flow through every check below exactly like a fresh
+     row, so a bad correction attempt is re-quarantined rather than let
+     through. See `apply_corrections()`.
+  2. Parse `purchase_timestamp` (ISO, or legacy "%m/%d/%Y %I:%M %p" used by
      pos_v2_batch) and `showtime` (ISO) into proper TIMESTAMP columns.
-  2. Deduplicate on `transaction_id`, keeping the earliest `purchase_timestamp`
+  3. Deduplicate on `transaction_id`, keeping the earliest `purchase_timestamp`
      (a replay of an existing transaction should not override the original
      purchase time).
-  3. Referential integrity: LEFT JOIN `bronze.theater_layout` on
+  4. Referential integrity: LEFT JOIN `bronze.theater_layout` on
      `(theater_id, screen_id)` and `bronze.imdb_movie_metadata` on `movie_id`.
      A null match means an orphan reference.
-  4. Business rules: `ticket_price` in (0, 100], `seats_sold` > 0, and
+  5. Business rules: `ticket_price` in (0, 100], `seats_sold` > 0, and
      `format = 'IMAX'` only on an `imax_capable` screen.
-  5. Final output is ordered by (theater_id, screen_id, showtime,
+  6. Manual override: if a steward's decision is `APPROVE_AS_IS`, the row is
+     accepted regardless of which check(s) fired above -- a human has
+     confirmed the flagged condition is a false positive. See
+     `apply_manual_overrides()`.
+  7. Final output is ordered by (theater_id, screen_id, showtime,
      purchase_timestamp) for deterministic, idempotent replay.
 
 Each row is assigned at most one `rejection_reason` -- the checks above are
@@ -24,9 +37,17 @@ evaluated in this precedence order, first match wins:
   null_screen_id > null_showtime > invalid_ticket_price >
   invalid_seats_sold > orphan_theater > orphan_movie > format_mismatch
 
+A row's `resolution_status` tracks where it sits in the correction
+feedback loop: `PENDING_REVIEW` (quarantined, no decision yet),
+`CORRECTED` / `APPROVED_AS_IS` (accepted via steward decision),
+`REJECTED_PERMANENTLY` (steward confirmed it's unrecoverable), or
+`CORRECTION_FAILED_REVALIDATION` (a correction was attempted but the
+corrected values still fail validation).
+
 Outputs:
   silver.stg_pos_ticket_sales  -- clean, validated, deduplicated rows
-  silver.pos_quality_issues    -- rejected rows + rejection_reason
+  silver.pos_quality_issues    -- rejected rows + rejection_reason + resolution_status
+  silver.pos_corrections       -- created empty if missing; read-only here
 
 Run via DABs:
     databricks bundle run -t dev build_medallion_theater_sales
@@ -53,6 +74,14 @@ RAW_COLUMNS: list[str] = [
 ISO_TS_PATTERN = "yyyy-MM-dd'T'HH:mm:ss"
 LEGACY_TS_PATTERN = "MM/dd/yyyy hh:mm a"
 
+# Fields a steward can override via silver.pos_corrections. Deliberately
+# excludes transaction_id (the natural/join key) and payment_method
+# (never a cause of quarantine, no correction scenario needs it).
+CORRECTABLE_FIELDS: list[str] = [
+    "theater_id", "screen_id", "movie_id", "format",
+    "showtime", "ticket_price", "seats_sold", "purchase_timestamp",
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -61,6 +90,101 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--silver-schema", required=True)
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args()
+
+
+def ensure_corrections_table(spark: SparkSession, table: str) -> None:
+    """Creates silver.pos_corrections if it doesn't exist yet (fresh deploy).
+
+    This script only ever reads this table -- it is written to by a data
+    steward (the App's Data Steward Review tab) or by seed_demo_corrections.py.
+    Plain DDL (not a DataFrame write) so a re-run of this script can never
+    clobber existing, possibly human-entered, correction rows.
+    """
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {table} (
+            transaction_id STRING NOT NULL,
+            decision STRING,
+            corrected_theater_id STRING,
+            corrected_screen_id STRING,
+            corrected_movie_id STRING,
+            corrected_format STRING,
+            corrected_showtime STRING,
+            corrected_ticket_price DOUBLE,
+            corrected_seats_sold INT,
+            corrected_purchase_timestamp STRING,
+            review_notes STRING,
+            reviewed_by STRING,
+            reviewed_at TIMESTAMP
+        ) USING DELTA
+        COMMENT 'Human-reviewed corrections/annotations for pos_quality_issues rows. decision is one of APPROVE_AS_IS, CORRECT, REJECT_PERMANENTLY. corrected_* columns are nullable -- only the field(s) actually being fixed are populated; everything else falls back to the original Bronze value.'
+    """)
+
+
+def apply_corrections(df: DataFrame, corrections_df: DataFrame) -> DataFrame:
+    """LEFT JOINs silver.pos_corrections onto the raw POS rows by
+    transaction_id and substitutes corrected field values via COALESCE --
+    *before* any validation runs, so a correction is re-validated exactly
+    like a fresh row rather than given a free pass. Carries `decision`,
+    `review_notes`, `reviewed_by`, `reviewed_at` through for
+    apply_manual_overrides() and for audit visibility downstream.
+    """
+    corrections = corrections_df.select(
+        F.col("transaction_id").alias("_c_transaction_id"),
+        "decision", "review_notes", "reviewed_by", "reviewed_at",
+        *[F.col(f"corrected_{field}").alias(f"_c_{field}") for field in CORRECTABLE_FIELDS],
+    )
+    df = df.join(
+        corrections,
+        df["transaction_id"] == corrections["_c_transaction_id"],
+        how="left",
+    ).drop("_c_transaction_id")
+
+    for field in CORRECTABLE_FIELDS:
+        df = df.withColumn(field, F.coalesce(F.col(f"_c_{field}"), F.col(field)))
+    return df.drop(*[f"_c_{field}" for field in CORRECTABLE_FIELDS])
+
+
+def apply_manual_overrides(df: DataFrame) -> DataFrame:
+    """Applies the steward's decision after validation has already run, and
+    computes the audit/resolution columns for the feedback loop.
+
+    - APPROVE_AS_IS: accepted regardless of which check(s) fired -- a human
+      has confirmed the flagged condition is a false positive.
+    - CORRECT: no override needed here -- apply_corrections() already
+      substituted the corrected values, which ran through the normal
+      validation above; if they now pass, rejection_reason is already NULL.
+      If they still fail, resolution_status reflects that explicitly
+      (CORRECTION_FAILED_REVALIDATION) rather than silently re-quarantining
+      with no indication the steward's fix didn't work.
+    - REJECT_PERMANENTLY / no decision: no override -- stays however
+      validation flagged it.
+    """
+    df = df.withColumn("is_manually_approved", F.col("decision") == "APPROVE_AS_IS")
+    df = df.withColumn(
+        "rejection_reason",
+        F.when(F.col("is_manually_approved"), F.lit(None).cast("string"))
+         .otherwise(F.col("rejection_reason")),
+    )
+    df = df.withColumn(
+        "is_corrected",
+        (F.col("decision") == "CORRECT") & F.col("rejection_reason").isNull(),
+    )
+    df = df.withColumn(
+        "resolution_status",
+        F.when(F.col("is_manually_approved"), F.lit("APPROVED_AS_IS"))
+         .when(F.col("is_corrected"), F.lit("CORRECTED"))
+         .when(
+             F.col("rejection_reason").isNotNull() & (F.col("decision") == "REJECT_PERMANENTLY"),
+             F.lit("REJECTED_PERMANENTLY"),
+         )
+         .when(
+             F.col("rejection_reason").isNotNull() & (F.col("decision") == "CORRECT"),
+             F.lit("CORRECTION_FAILED_REVALIDATION"),
+         )
+         .when(F.col("rejection_reason").isNotNull(), F.lit("PENDING_REVIEW"))
+         .otherwise(F.lit(None).cast("string")),
+    )
+    return df
 
 
 def parse_timestamps(df: DataFrame) -> DataFrame:
@@ -164,18 +288,24 @@ def main() -> None:
     movie_table = f"{args.catalog}.{args.bronze_schema}.imdb_movie_metadata"
     stg_table = f"{args.catalog}.{args.silver_schema}.stg_pos_ticket_sales"
     quality_table = f"{args.catalog}.{args.silver_schema}.pos_quality_issues"
+    corrections_table = f"{args.catalog}.{args.silver_schema}.pos_corrections"
 
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {args.catalog}.{args.silver_schema}")
+    ensure_corrections_table(spark, corrections_table)
 
-    logger.info("Reading: %s, %s, %s", pos_table, layout_table, movie_table)
+    logger.info("Reading: %s, %s, %s, %s", pos_table, layout_table, movie_table, corrections_table)
     pos_df = spark.table(pos_table)
     layout_df = spark.table(layout_table)
     movie_df = spark.table(movie_table)
+    corrections_df = spark.table(corrections_table)
     pos_count = pos_df.count()
+    corrections_count = corrections_df.count()
 
-    df = parse_timestamps(pos_df)
+    df = apply_corrections(pos_df, corrections_df)
+    df = parse_timestamps(df)
     df = add_referential_integrity(df, layout_df, movie_df)
     df = add_quality_flags(df)
+    df = apply_manual_overrides(df)
     df = df.withColumn("quality_checked_at", F.current_timestamp())
     # Bronze does not persist a row-level arrival timestamp (Phase 1 left
     # ingest tasks unchanged); this is a proxy for "when Silver observed it".
@@ -189,13 +319,20 @@ def main() -> None:
             "ticket_type", "ticket_price", "seats_sold",
             F.col("_parsed_purchase_timestamp").alias("purchase_timestamp"),
             "payment_method", "pos_source", "quality_checked_at", "ingest_timestamp",
+            "is_corrected", "is_manually_approved",
+            F.col("reviewed_by").alias("correction_reviewed_by"),
+            F.col("reviewed_at").alias("correction_reviewed_at"),
+            F.col("review_notes").alias("correction_notes"),
         )
         .withColumn("data_quality_flag", F.lit(False))
         .orderBy("theater_id", "screen_id", "showtime", "purchase_timestamp")
     )
     rejected_df = (
         df.filter(F.col("rejection_reason").isNotNull())
-        .select(*RAW_COLUMNS, "rejection_reason", "quality_checked_at", "ingest_timestamp")
+        .select(
+            *RAW_COLUMNS, "rejection_reason", "quality_checked_at", "ingest_timestamp",
+            "resolution_status", "reviewed_by", "reviewed_at", "review_notes",
+        )
         .withColumn("data_quality_flag", F.lit(True))
     )
 
@@ -211,9 +348,19 @@ def main() -> None:
     accepted_count = spark.table(stg_table).count()
     rejected_count = spark.table(quality_table).count()
     logger.info("bronze.pos_ticket_sales: %s rows", f"{pos_count:,}")
+    logger.info("%s: %s correction rows available", corrections_table, f"{corrections_count:,}")
     logger.info("%s: %s rows accepted", stg_table, f"{accepted_count:,}")
     logger.info("%s: %s rows rejected", quality_table, f"{rejected_count:,}")
+    corrected_count = spark.table(stg_table).filter("is_corrected OR is_manually_approved").count()
+    if corrected_count:
+        logger.info("%s rows accepted via the correction feedback loop this run", corrected_count)
     if rejected_count:
+        logger.info("Resolution status breakdown:")
+        (spark.table(quality_table)
+              .groupBy("resolution_status")
+              .count()
+              .orderBy("resolution_status")
+              .show(truncate=False))
         logger.info("Rejection breakdown by POS system and reason:")
         (spark.table(quality_table)
               .groupBy("pos_source", "rejection_reason")
