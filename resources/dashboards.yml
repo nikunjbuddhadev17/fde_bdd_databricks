@@ -1,0 +1,7 @@
+resources:
+  dashboards:
+    theater_performance:
+      display_name: "Theater Performance"
+      file_path: ../src/dashboard/theater_performance.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      parent_path: ${workspace.root_path}

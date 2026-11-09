@@ -1,0 +1,51 @@
+# Databricks Asset Bundle: FDE Interview Packet -- Theater Sales Pipeline
+#
+# Two jobs power the as-is architecture:
+#   1. seed_theater_data -- loads the three bundled CSVs into bronze Delta tables
+#   2. build_denormalized_theater_sales -- inner-joins the bronze tables into the
+#      denormalized table that powers the Theater Performance dashboard
+#
+# Default workspace init:
+#   databricks bundle deploy -t dev
+#   databricks bundle run    -t dev seed_theater_data
+#   databricks bundle run    -t dev build_denormalized_theater_sales
+#
+# Start the provided Gradio application:
+#   databricks apps start reel_insights_app--profile=my-profile
+#
+# Default catalog is workspace (Unity Catalog).
+
+bundle:
+  name: fde_theater
+  databricks_cli_version: ">= 0.260.0"
+
+include:
+  - resources/dashboards.yml
+  - resources/jobs.yml
+  - resources/apps.yml
+
+sync:
+  exclude:
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+
+variables:
+  catalog:
+    description: "Catalog where bronze + denormalized tables are written."
+    default: workspace
+  schema:
+    description: "Schema where bronze + denormalized tables are written."
+    default: fde_theater
+  warehouse_id:
+    description: "SQL warehouse ID used by the dashboard. Defaults to the Serverless Starter Warehouse present in fresh workspaces; override with --var=\"warehouse_id=<id>\" if it has been renamed or deleted."
+    lookup:
+      warehouse: "Serverless Starter Warehouse"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/fde_interview
+    run_as:
+      user_name: ${workspace.current_user.userName}

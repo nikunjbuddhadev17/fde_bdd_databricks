@@ -1,0 +1,6 @@
+resources:
+  apps:
+    reel_insights_app:
+      name: reel-insights-app
+      description: A Gradio application for generating insights from theater data
+      source_code_path: ../src/app

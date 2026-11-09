@@ -1,0 +1,961 @@
+{
+  "datasets": [
+    {
+      "name": "ds_sales",
+      "displayName": "Denormalized Theater Sales",
+      "queryLines": [
+        "WITH d AS (\n",
+        "  SELECT *\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :schema || '.denormalized_theater_sales')\n",
+        "  WHERE showtime IS NOT NULL\n",
+        "), bounds AS (\n",
+        "  SELECT MAX(CAST(showtime AS DATE)) AS max_d FROM d\n",
+        ")\n",
+        "SELECT d.*\n",
+        "FROM d, bounds\n",
+        "WHERE CAST(d.showtime AS DATE) BETWEEN DATE_TRUNC('YEAR', max_d) AND max_d"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "workspace"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "schema",
+          "keyword": "schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "fde_theater"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_last_week_revenue",
+      "displayName": "Last Week Revenue",
+      "queryLines": [
+        "WITH d AS (\n",
+        "  SELECT theater_name, showtime, gross_revenue\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :schema || '.denormalized_theater_sales')\n",
+        "  WHERE showtime IS NOT NULL\n",
+        "), bounds AS (\n",
+        "  SELECT MAX(CAST(showtime AS DATE)) AS max_d FROM d\n",
+        ")\n",
+        "SELECT theater_name, gross_revenue\n",
+        "FROM d, bounds\n",
+        "WHERE CAST(showtime AS DATE) BETWEEN DATE_SUB(max_d, 6) AND max_d"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "workspace"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "schema",
+          "keyword": "schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "fde_theater"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_last_week_tickets_by_hour",
+      "displayName": "Last Week Tickets by Hour",
+      "queryLines": [
+        "WITH d AS (\n",
+        "  SELECT theater_name, showtime, seats_sold\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :schema || '.denormalized_theater_sales')\n",
+        "  WHERE showtime IS NOT NULL\n",
+        "), bounds AS (\n",
+        "  SELECT MAX(CAST(showtime AS DATE)) AS max_d FROM d\n",
+        ")\n",
+        "SELECT theater_name, CAST(HOUR(showtime) AS STRING) AS showtime_hour, seats_sold\n",
+        "FROM d, bounds\n",
+        "WHERE CAST(showtime AS DATE) BETWEEN DATE_SUB(max_d, 6) AND max_d"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "workspace"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "schema",
+          "keyword": "schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "fde_theater"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_downtime_ytd_by_dow",
+      "displayName": "Downtime by Day of Week (YTD)",
+      "queryLines": [
+        "WITH d AS (\n",
+        "  SELECT theater_name, open_time, close_time, screen_id, showtime, runtime_minutes\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :schema || '.denormalized_theater_sales')\n",
+        "  WHERE showtime IS NOT NULL\n",
+        "), bounds AS (\n",
+        "  SELECT MAX(CAST(showtime AS DATE)) AS max_d FROM d\n",
+        "), filtered AS (\n",
+        "  SELECT d.* FROM d, bounds\n",
+        "  WHERE CAST(d.showtime AS DATE) BETWEEN DATE_TRUNC('YEAR', max_d) AND max_d\n",
+        "), daily AS (\n",
+        "  SELECT theater_name, open_time, close_time, screen_id,\n",
+        "    CAST(showtime AS DATE) AS show_date,\n",
+        "    SUM(runtime_minutes) AS show_minutes\n",
+        "  FROM filtered\n",
+        "  GROUP BY theater_name, open_time, close_time, screen_id, CAST(showtime AS DATE)\n",
+        ")\n",
+        "SELECT theater_name,\n",
+        "  CAST(DAYOFWEEK(show_date) AS INT) AS dow_num,\n",
+        "  CONCAT(DAYOFWEEK(show_date), ' ', DATE_FORMAT(show_date, 'EEE')) AS day_of_week,\n",
+        "  ((CASE WHEN close_time = '00:00' THEN 1440\n",
+        "         ELSE CAST(SUBSTRING(close_time, 1, 2) AS INT) * 60 + CAST(SUBSTRING(close_time, 4, 2) AS INT)\n",
+        "    END) - (CAST(SUBSTRING(open_time, 1, 2) AS INT) * 60 + CAST(SUBSTRING(open_time, 4, 2) AS INT)))\n",
+        "    - show_minutes AS downtime_minutes\n",
+        "FROM daily"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "workspace"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "schema",
+          "keyword": "schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "fde_theater"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ds_downtime_last_week_by_dow",
+      "displayName": "Downtime by Day of Week (Last Week)",
+      "queryLines": [
+        "WITH d AS (\n",
+        "  SELECT theater_name, open_time, close_time, screen_id, showtime, runtime_minutes\n",
+        "  FROM IDENTIFIER(:catalog || '.' || :schema || '.denormalized_theater_sales')\n",
+        "  WHERE showtime IS NOT NULL\n",
+        "), bounds AS (\n",
+        "  SELECT MAX(CAST(showtime AS DATE)) AS max_d FROM d\n",
+        "), filtered AS (\n",
+        "  SELECT d.* FROM d, bounds\n",
+        "  WHERE CAST(d.showtime AS DATE) BETWEEN DATE_SUB(max_d, 6) AND max_d\n",
+        "), daily AS (\n",
+        "  SELECT theater_name, open_time, close_time, screen_id,\n",
+        "    CAST(showtime AS DATE) AS show_date,\n",
+        "    SUM(runtime_minutes) AS show_minutes\n",
+        "  FROM filtered\n",
+        "  GROUP BY theater_name, open_time, close_time, screen_id, CAST(showtime AS DATE)\n",
+        ")\n",
+        "SELECT theater_name,\n",
+        "  CAST(DAYOFWEEK(show_date) AS INT) AS dow_num,\n",
+        "  CONCAT(DAYOFWEEK(show_date), ' ', DATE_FORMAT(show_date, 'EEE')) AS day_of_week,\n",
+        "  ((CASE WHEN close_time = '00:00' THEN 1440\n",
+        "         ELSE CAST(SUBSTRING(close_time, 1, 2) AS INT) * 60 + CAST(SUBSTRING(close_time, 4, 2) AS INT)\n",
+        "    END) - (CAST(SUBSTRING(open_time, 1, 2) AS INT) * 60 + CAST(SUBSTRING(open_time, 4, 2) AS INT)))\n",
+        "    - show_minutes AS downtime_minutes\n",
+        "FROM daily"
+      ],
+      "parameters": [
+        {
+          "displayName": "catalog",
+          "keyword": "catalog",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "workspace"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "schema",
+          "keyword": "schema",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "fde_theater"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_theater_performance",
+      "displayName": "Theater Performance",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter_theater",
+            "queries": [
+              {
+                "name": "fq_sales",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "theater_name",
+                      "expression": "`theater_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              },
+              {
+                "name": "fq_lwr",
+                "query": {
+                  "datasetName": "ds_last_week_revenue",
+                  "fields": [
+                    {
+                      "name": "theater_name",
+                      "expression": "`theater_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              },
+              {
+                "name": "fq_lwh",
+                "query": {
+                  "datasetName": "ds_last_week_tickets_by_hour",
+                  "fields": [
+                    {
+                      "name": "theater_name",
+                      "expression": "`theater_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              },
+              {
+                "name": "fq_dwy",
+                "query": {
+                  "datasetName": "ds_downtime_ytd_by_dow",
+                  "fields": [
+                    {
+                      "name": "theater_name",
+                      "expression": "`theater_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              },
+              {
+                "name": "fq_dwl",
+                "query": {
+                  "datasetName": "ds_downtime_last_week_by_dow",
+                  "fields": [
+                    {
+                      "name": "theater_name",
+                      "expression": "`theater_name`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "theater_name",
+                    "displayName": "Theater",
+                    "queryName": "fq_sales"
+                  },
+                  {
+                    "fieldName": "theater_name",
+                    "displayName": "Theater",
+                    "queryName": "fq_lwr"
+                  },
+                  {
+                    "fieldName": "theater_name",
+                    "displayName": "Theater",
+                    "queryName": "fq_lwh"
+                  },
+                  {
+                    "fieldName": "theater_name",
+                    "displayName": "Theater",
+                    "queryName": "fq_dwy"
+                  },
+                  {
+                    "fieldName": "theater_name",
+                    "displayName": "Theater",
+                    "queryName": "fq_dwl"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Select your theater"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_total_revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "total_revenue",
+                      "expression": "SUM(`gross_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_revenue",
+                  "displayName": "Total Revenue",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Total Revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_tickets_sold",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "tickets_sold",
+                      "expression": "SUM(`seats_sold`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "tickets_sold",
+                  "displayName": "Tickets Sold",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets Sold"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 3,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_avg_ticket_price",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "avg_price",
+                      "expression": "AVG(`ticket_price`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg_price",
+                  "displayName": "Avg Ticket Price",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Ticket Price"
+              }
+            }
+          },
+          "position": {
+            "x": 16,
+            "y": 3,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_revenue_by_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "show_date",
+                      "expression": "DATE_TRUNC('DAY', `showtime`)"
+                    },
+                    {
+                      "name": "revenue",
+                      "expression": "SUM(`gross_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "show_date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Show Date"
+                },
+                "y": {
+                  "fieldName": "revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Revenue"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Revenue by Day"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 24,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_revenue_by_movie",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "movie_title",
+                      "expression": "`movie_title`"
+                    },
+                    {
+                      "name": "revenue",
+                      "expression": "SUM(`gross_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Revenue"
+                },
+                "y": {
+                  "fieldName": "movie_title",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Movie"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Revenue by Movie"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_revenue_by_genre",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_sales",
+                  "fields": [
+                    {
+                      "name": "genre",
+                      "expression": "`genre`"
+                    },
+                    {
+                      "name": "revenue",
+                      "expression": "SUM(`gross_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Revenue"
+                },
+                "y": {
+                  "fieldName": "genre",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  },
+                  "displayName": "Genre"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Revenue by Genre"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 12,
+            "width": 17,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_last_week_revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_last_week_revenue",
+                  "fields": [
+                    {
+                      "name": "revenue",
+                      "expression": "SUM(`gross_revenue`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "revenue",
+                  "displayName": "Previous Week Revenue",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Previous Week Revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_tickets_by_hour_last_week",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_last_week_tickets_by_hour",
+                  "fields": [
+                    {
+                      "name": "showtime_hour",
+                      "expression": "`showtime_hour`"
+                    },
+                    {
+                      "name": "tickets",
+                      "expression": "SUM(`seats_sold`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "showtime_hour",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x"
+                    }
+                  },
+                  "displayName": "Showtime Hour"
+                },
+                "y": {
+                  "fieldName": "tickets",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Tickets Sold"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets Sold by Hour (Previous Week)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 26,
+            "width": 16,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "e4a0c47e",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Last Week Review"
+              ],
+              "verticalAlign": "VERTICAL_ALIGN_CENTER"
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 24,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "fcaf43f8",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Year to Date Review"
+              ],
+              "verticalAlign": "VERTICAL_ALIGN_CENTER"
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_downtime_by_dow_ytd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_downtime_ytd_by_dow",
+                  "fields": [
+                    {
+                      "name": "day_of_week",
+                      "expression": "`day_of_week`"
+                    },
+                    {
+                      "name": "downtime",
+                      "expression": "SUM(`downtime_minutes`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day_of_week",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x"
+                    }
+                  },
+                  "displayName": "Day of Week"
+                },
+                "y": {
+                  "fieldName": "downtime",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Downtime Minutes"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Downtime by Day of Week (YTD)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 18,
+            "width": 24,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "chart_downtime_by_dow_last_week",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_downtime_last_week_by_dow",
+                  "fields": [
+                    {
+                      "name": "day_of_week",
+                      "expression": "`day_of_week`"
+                    },
+                    {
+                      "name": "downtime",
+                      "expression": "SUM(`downtime_minutes`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day_of_week",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x"
+                    }
+                  },
+                  "displayName": "Day of Week"
+                },
+                "y": {
+                  "fieldName": "downtime",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Downtime Minutes"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Downtime by Day of Week (Previous Week)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 32,
+            "width": 24,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ]
+}

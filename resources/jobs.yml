@@ -1,0 +1,91 @@
+# Jobs: seed_theater_data -> build_denormalized_theater_sales is the default init path.
+# Serverless compute: job environments with environment_version 5 (latest serverless
+# environment; required for Databricks Free Edition, which only supports serverless).
+#
+# Within seed_theater_data, ingest_pos_ticket_sales depends on the other two ingest
+# tasks because POS reads theater_layout and imdb_movie_metadata for FK consistency.
+resources:
+  jobs:
+    seed_theater_data:
+      name: "Seed Theater Data"
+      description: >-
+        Generates the three source datasets (theater layout, IMDB movie metadata,
+        POS ticket sales) deterministically and writes them to the configured
+        catalog/schema. POS data has seeded DQ issues clustered by POS system;
+        theater layout and movie metadata are clean.
+      tags:
+        purpose: fde_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      tasks:
+        - task_key: ingest_theater_layout
+          description: Generate and write the theater_layout table.
+          spark_python_task:
+            python_file: ../src/ingest/ingest_theater_layout.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+          environment_key: default
+
+        - task_key: ingest_imdb_metadata
+          description: Generate and write the imdb_movie_metadata table.
+          spark_python_task:
+            python_file: ../src/ingest/ingest_imdb_metadata.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+          environment_key: default
+
+        - task_key: ingest_pos_ticket_sales
+          description: >-
+            Generate and write the pos_ticket_sales table. Reads theater_layout
+            and imdb_movie_metadata for FK-consistent transactions before DQ
+            injection.
+          depends_on:
+            - task_key: ingest_theater_layout
+            - task_key: ingest_imdb_metadata
+          spark_python_task:
+            python_file: ../src/ingest/ingest_pos_ticket_sales.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+          environment_key: default
+      environments: &fde_serverless_env
+        - environment_key: default
+          spec:
+            environment_version: "5"
+
+    build_denormalized_theater_sales:
+      name: "Build Denormalized Theater Sales"
+      description: >-
+        Inner-joins the three source tables into the denormalized_theater_sales
+        table that powers the Theater Performance dashboard. Run after
+        seed_theater_data.
+      tags:
+        purpose: fde_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+      tasks:
+        - task_key: build_denormalized_theater_sales
+          description: Build the denormalized theater sales table from the source tables.
+          spark_python_task:
+            python_file: ../src/transform/build_denormalized_theater_sales.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--schema"
+              - "{{job.parameters.schema}}"
+          environment_key: default
+      environments: *fde_serverless_env
