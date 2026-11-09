@@ -1,53 +1,103 @@
-# Jobs: seed_theater_data -> build_denormalized_theater_sales is the default init path.
+# Jobs configuration for the medallion architecture pipeline.
+# 
+# Execution flow:
+#   1. init_medallion_catalog: Create catalog and schemas (one-time setup)
+#   2. build_medallion_theater_sales: Full medallion pipeline
+#      - Task: seed_theater_data (Bronze: raw ingest -- reuses the seed_theater_data
+#        job below via run_job_task, so there is a single source of truth for it)
+#      - Task: silver_pos_ticket_sales, silver_theater_layout, silver_imdb_movie_metadata
+#        (Silver: clean, deduplicate, and validate; depend only on seed_theater_data
+#        so they run in parallel)
+#      - Task: gold_fct_ticket_sales (Gold: business-ready facts; depends on all
+#        three Silver tasks)
+#      - Task: quality_summary (Logging & metrics; depends on gold_fct_ticket_sales)
+#
 # Serverless compute: job environments with environment_version 5 (latest serverless
 # environment; required for Databricks Free Edition, which only supports serverless).
 #
 # Within seed_theater_data, ingest_pos_ticket_sales depends on the other two ingest
 # tasks because POS reads theater_layout and imdb_movie_metadata for FK consistency.
+
 resources:
   jobs:
+    init_medallion_catalog:
+      name: "Initialize Medallion Catalog & Schemas"
+      description: >-
+        One-time setup: Creates the theater_management catalog and three schemas
+        (bronze, silver, gold). Run this before the medallion pipeline.
+      tags:
+        purpose: fde_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+      tasks:
+        - task_key: init_medallion_catalog
+          description: Create medallion catalog and schemas.
+          spark_python_task:
+            python_file: ../src/init/init_medallion_catalog.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+              - "--gold-schema"
+              - "{{job.parameters.gold_schema}}"
+          environment_key: default
+      environments: &fde_serverless_env
+        - environment_key: default
+          spec:
+            environment_version: "5"
+
     seed_theater_data:
       name: "Seed Theater Data"
       description: >-
         Generates the three source datasets (theater layout, IMDB movie metadata,
         POS ticket sales) deterministically and writes them to the configured
-        catalog/schema. POS data has seeded DQ issues clustered by POS system;
+        catalog/bronze schema. POS data has seeded DQ issues clustered by POS system;
         theater layout and movie metadata are clean.
       tags:
         purpose: fde_interview_packet
       parameters:
         - name: catalog
           default: ${var.catalog}
-        - name: schema
-          default: ${var.schema}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
       tasks:
         - task_key: ingest_theater_layout
-          description: Generate and write the theater_layout table.
+          description: Generate and write the theater_layout table to bronze schema.
           spark_python_task:
             python_file: ../src/ingest/ingest_theater_layout.py
             parameters:
               - "--catalog"
               - "{{job.parameters.catalog}}"
               - "--schema"
-              - "{{job.parameters.schema}}"
+              - "{{job.parameters.bronze_schema}}"
           environment_key: default
 
         - task_key: ingest_imdb_metadata
-          description: Generate and write the imdb_movie_metadata table.
+          description: Generate and write the imdb_movie_metadata table to bronze schema.
           spark_python_task:
             python_file: ../src/ingest/ingest_imdb_metadata.py
             parameters:
               - "--catalog"
               - "{{job.parameters.catalog}}"
               - "--schema"
-              - "{{job.parameters.schema}}"
+              - "{{job.parameters.bronze_schema}}"
           environment_key: default
 
         - task_key: ingest_pos_ticket_sales
           description: >-
-            Generate and write the pos_ticket_sales table. Reads theater_layout
-            and imdb_movie_metadata for FK-consistent transactions before DQ
-            injection.
+            Generate and write the pos_ticket_sales table to bronze schema.
+            Reads theater_layout and imdb_movie_metadata for FK-consistent
+            transactions before DQ injection.
           depends_on:
             - task_key: ingest_theater_layout
             - task_key: ingest_imdb_metadata
@@ -57,12 +107,9 @@ resources:
               - "--catalog"
               - "{{job.parameters.catalog}}"
               - "--schema"
-              - "{{job.parameters.schema}}"
+              - "{{job.parameters.bronze_schema}}"
           environment_key: default
-      environments: &fde_serverless_env
-        - environment_key: default
-          spec:
-            environment_version: "5"
+      environments: *fde_serverless_env
 
     build_denormalized_theater_sales:
       name: "Build Denormalized Theater Sales"
@@ -75,8 +122,8 @@ resources:
       parameters:
         - name: catalog
           default: ${var.catalog}
-        - name: schema
-          default: ${var.schema}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
       tasks:
         - task_key: build_denormalized_theater_sales
           description: Build the denormalized theater sales table from the source tables.
@@ -86,6 +133,131 @@ resources:
               - "--catalog"
               - "{{job.parameters.catalog}}"
               - "--schema"
-              - "{{job.parameters.schema}}"
+              - "{{job.parameters.bronze_schema}}"
+          environment_key: default
+      environments: *fde_serverless_env
+
+    build_medallion_theater_sales:
+      name: "Build Medallion Theater Sales"
+      description: >-
+        Full medallion pipeline: seeds Bronze, cleanses/dedupes/validates each
+        source into Silver (quarantining rejected rows with a reason code),
+        joins the validated Silver tables into the Gold fact table, and logs a
+        bronze -> silver -> gold quality summary. Replaces
+        build_denormalized_theater_sales as the pipeline that powers the
+        dashboard once Gold is validated (see Phase 4: Cutover).
+      tags:
+        purpose: fde_interview_packet
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: bronze_schema
+          default: ${var.bronze_schema}
+        - name: silver_schema
+          default: ${var.silver_schema}
+        - name: gold_schema
+          default: ${var.gold_schema}
+      tasks:
+        - task_key: seed_theater_data
+          description: >-
+            Bronze: run the existing seed_theater_data job so ingest logic has
+            a single source of truth instead of being duplicated here.
+          run_job_task:
+            job_id: ${resources.jobs.seed_theater_data.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              bronze_schema: "{{job.parameters.bronze_schema}}"
+
+        - task_key: silver_pos_ticket_sales
+          description: >-
+            Silver: parse timestamps, deduplicate transaction_id (keep
+            earliest), validate FK references and business rules. Outputs
+            stg_pos_ticket_sales and pos_quality_issues.
+          depends_on:
+            - task_key: seed_theater_data
+          spark_python_task:
+            python_file: ../src/transform/silver_pos_ticket_sales.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+          environment_key: default
+
+        - task_key: silver_theater_layout
+          description: >-
+            Silver: deduplicate screen_id, validate required fields and
+            business rules. Outputs stg_theater_layout and
+            theater_layout_quality_issues.
+          depends_on:
+            - task_key: seed_theater_data
+          spark_python_task:
+            python_file: ../src/transform/silver_theater_layout.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+          environment_key: default
+
+        - task_key: silver_imdb_movie_metadata
+          description: >-
+            Silver: deduplicate imdb_id, validate critical fields and rating
+            and runtime ranges. Outputs stg_imdb_movie_metadata and
+            imdb_quality_issues.
+          depends_on:
+            - task_key: seed_theater_data
+          spark_python_task:
+            python_file: ../src/transform/silver_imdb_movie_metadata.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+          environment_key: default
+
+        - task_key: gold_fct_ticket_sales
+          description: >-
+            Gold: LEFT JOIN the validated Silver tables into the
+            business-ready fct_ticket_sales table.
+          depends_on:
+            - task_key: silver_pos_ticket_sales
+            - task_key: silver_theater_layout
+            - task_key: silver_imdb_movie_metadata
+          spark_python_task:
+            python_file: ../src/transform/gold_fct_ticket_sales.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+              - "--gold-schema"
+              - "{{job.parameters.gold_schema}}"
+          environment_key: default
+
+        - task_key: quality_summary
+          description: >-
+            Logs rows input -> silver -> gold, overall and per-POS-system
+            rejection rates, and top rejection reasons; persists the report to
+            gold.dq_summary.
+          depends_on:
+            - task_key: gold_fct_ticket_sales
+          spark_python_task:
+            python_file: ../src/transform/quality_summary.py
+            parameters:
+              - "--catalog"
+              - "{{job.parameters.catalog}}"
+              - "--bronze-schema"
+              - "{{job.parameters.bronze_schema}}"
+              - "--silver-schema"
+              - "{{job.parameters.silver_schema}}"
+              - "--gold-schema"
+              - "{{job.parameters.gold_schema}}"
           environment_key: default
       environments: *fde_serverless_env
