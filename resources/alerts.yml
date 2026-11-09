@@ -21,8 +21,8 @@ resources:
       display_name: "Theater Medallion: POS Rejection Rate Exceeds Threshold"
       custom_summary: >-
         A POS system's Silver rejection rate (rows quarantined to
-        pos_quality_issues / rows ingested to Bronze) exceeded the alert
-        threshold in the most recent build_medallion_theater_sales run.
+        pos_quality_issues divided by rows ingested to Bronze) exceeded the
+        alert threshold in the most recent build_medallion_theater_sales run.
         Check gold.dq_rejection_reasons and the Theater Data Quality
         Monitoring dashboard for the specific reason codes driving the spike.
       query_text: |
@@ -57,14 +57,14 @@ resources:
         timezone_id: "UTC"
 
     orphan_rate_spike_alert:
-      display_name: "Theater Medallion: Orphan Theater/Movie Rate Spike"
+      display_name: "Theater Medallion: Orphan Theater or Movie Rate Spike"
       custom_summary: >-
         A POS system's orphan_theater or orphan_movie reason rate (that
-        specific rejection reason / rows ingested to Bronze for that POS
-        system) exceeded the alert threshold in the most recent
-        build_medallion_theater_sales run. This is more targeted than the
-        overall rejection-rate alert: it isolates referential-integrity
-        failures (bad theater_id / movie_id) from other DQ issues like
+        specific rejection reason's row count divided by rows ingested to
+        Bronze for that POS system) exceeded the alert threshold in the most
+        recent build_medallion_theater_sales run. This is more targeted than
+        the overall rejection-rate alert: it isolates referential-integrity
+        failures (bad theater_id or movie_id) from other DQ issues like
         duplicates or bad prices.
       query_text: |
         SELECT
